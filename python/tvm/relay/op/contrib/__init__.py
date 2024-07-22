@@ -28,3 +28,4 @@ from .tensorrt import *
 from .cutlass import *
 from .clml import *
 from .mrvl import *
+from .headsail import *

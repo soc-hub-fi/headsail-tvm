@@ -1,0 +1,5 @@
+if(USE_HEADSAIL)
+  message(STATUS "BUILT WITH HEADSAIL SUPPORT!!!")
+  file(GLOB HEADSAIL_CONTRIB_SRC src/relay/backend/contrib/headsail/codegen.cc)
+  list(APPEND COMPILER_SRCS ${HEADSAIL_CONTRIB_SRC})
+endif(USE_HEADSAIL)

@@ -53,7 +53,7 @@ tvm_option(USE_HEXAGON_RPC "Enable Hexagon RPC using minRPC implementation over 
 tvm_option(USE_HEXAGON_GTEST "Path to Hexagon specific gtest version for runtime cpp tests." /path/to/hexagon/gtest)
 tvm_option(USE_HEXAGON_EXTERNAL_LIBS "Path to git repo containing external Hexagon runtime sources or libraries" OFF)
 tvm_option(USE_RPC "Build with RPC" ON)
-tvm_option(USE_THREADS "Build with thread support" ON)
+tvm_option(USE_THREADS "Build with thread support" OFF)
 tvm_option(USE_LLVM "Build with LLVM, can be set to specific llvm-config path" OFF)
 tvm_option(USE_MLIR "Build with MLIR support" OFF)
 tvm_option(USE_STACKVM_RUNTIME "Include stackvm into the runtime" OFF)
@@ -99,6 +99,7 @@ tvm_option(USE_BLAS "The blas library to be linked" none)
 tvm_option(USE_AMX "Enable Intel AMX" OFF)
 tvm_option(USE_MKL "MKL root path when use MKL blas" OFF)
 tvm_option(USE_DNNL "Enable DNNL codegen" OFF)
+tvm_option(USE_HEADSAIL "Enable Headsail codegen" OFF)
 tvm_option(USE_CUDNN "Build with cuDNN" OFF)
 tvm_option(USE_CUBLAS "Build with cuBLAS" OFF)
 tvm_option(USE_NVTX "Build with NVTX" OFF)
@@ -145,7 +146,6 @@ include_directories(SYSTEM ${PICOJSON_PATH})
 # initial variables
 set(TVM_LINKER_LIBS "")
 set(TVM_RUNTIME_LINKER_LIBS "")
-
 
 # Check if this is being run on its own or as a subdirectory for another project
 # If we update to CMake 2.21+, we can use PROJECT_IS_TOP_LEVEL instead
@@ -546,6 +546,7 @@ else()
 endif()
 
 # Module rules
+#
 include(cmake/modules/VTA.cmake)
 include(cmake/modules/StandaloneCrt.cmake)
 include(cmake/modules/CUDA.cmake)
@@ -564,6 +565,7 @@ include(cmake/modules/contrib/EthosU.cmake)
 include(cmake/modules/contrib/BLAS.cmake)
 include(cmake/modules/contrib/CODEGENC.cmake)
 include(cmake/modules/contrib/DNNL.cmake)
+include(cmake/modules/contrib/Headsail.cmake)
 include(cmake/modules/contrib/AMX.cmake)
 include(cmake/modules/contrib/CUTLASS.cmake)
 include(cmake/modules/contrib/ExampleTargetHooks.cmake)
@@ -977,3 +979,5 @@ if (USE_FLASHINFER STREQUAL "ON")
   target_link_libraries(tvm PRIVATE flashinfer_tvm)
   target_link_libraries(tvm_runtime PRIVATE flashinfer_tvm)
 endif ()
+
+
