@@ -63,11 +63,6 @@ def _register_external_op_helper(op_name, supported=True):
         typ = args[0].checked_type
         if typ.dtype != "int8":
             return False
-
-        global conv2d_counter
-        if conv2d_counter == True:
-            conv2d_counter = False
-        logger.info(expr.span)
         return supported
 
     return _func_wrapper
