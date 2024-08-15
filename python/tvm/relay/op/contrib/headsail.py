@@ -43,8 +43,6 @@ from .register import register_pattern_table
 from ..strategy.generic import is_depthwise_conv2d
 logger = logging.getLogger("HEADSAIL")
 
-conv2d_counter = True
-
 def _register_external_op_helper(op_name, supported=True):
     """The helper function to indicate that a given operator can be supported
     by Headsail.
@@ -65,11 +63,6 @@ def _register_external_op_helper(op_name, supported=True):
         typ = args[0].checked_type
         if typ.dtype != "int8":
             return False
-
-        global conv2d_counter
-        if conv2d_counter == True:
-            conv2d_counter = False
-        logger.info(expr.span)
         return supported
 
     return _func_wrapper
