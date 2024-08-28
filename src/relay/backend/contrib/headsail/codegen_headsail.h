@@ -293,6 +293,7 @@ class CodegenCBase {
                       const std::vector<std::string>& body, const std::string& const_arr_name,
                       const std::vector<Output>& outs) {
     // Create a declaration for global ndarrays that contain constant data.
+    code_stream_ << "#//This was generated with headsail codegen\n";
     if (!const_arr_name.empty()) {
       code_stream_ << "#ifdef __cplusplus\n";
       code_stream_ << const_arr_name << "\n\n";
@@ -329,7 +330,7 @@ class CodegenCBase {
         continue;
       }
       this->PrintIndents();
-      code_stream_ << "memcpy(out" << i << ", " << outs[i].name << ", 4 * " << outs[i].size
+      code_stream_ << "memcpy(out" << i << ", " << outs[i].name << ", " << outs[i].size
                    << ");\n";
     }
 
@@ -424,7 +425,7 @@ class CodegenCBase {
    * \return The created reference
    */
   std::string CreateDataReference(const std::string& symbol, size_t const_id) const {
-    return "(float*)(" + symbol + "_consts[" + std::to_string(const_id) + "]->data)";
+    return "(int*)(" + symbol + "_consts[" + std::to_string(const_id) + "]->data)";
   }
 
   /*!
@@ -451,7 +452,7 @@ class CodegenCBase {
  * \brief A pass to translate all "Primitive" Relay functions with "Compiler=ccompiler" to
  * a \p CSourceModule.
  */
-transform::Pass CCompilerPass();
+transform::Pass HeadsailCompilerPass();
 
 }  // namespace contrib
 }  // namespace relay

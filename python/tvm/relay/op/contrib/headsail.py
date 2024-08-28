@@ -34,10 +34,15 @@ check the attributes of the op and decide if it should be offloaded to DNNL.
 """
 import logging
 import tvm.ir
-from ...dataflow_pattern import wildcard, is_op
+from tvm import relay
+from ...dataflow_pattern import DFPatternCallback, wildcard, is_op, is_constant, is_expr
+from tvm.relay.expr import Call, GlobalVar, TupleGetItem, const
 from .register import register_pattern_table
 
-logger = logging.getLogger("DNNL")
+from ..strategy.generic import is_depthwise_conv2d
+logger = logging.getLogger("HEADSAIL")
+
+conv2d_counter = True
 
 def _register_external_op_helper(op_name, supported=True):
     """The helper function to indicate that a given operator can be supported
@@ -59,31 +64,67 @@ def _register_external_op_helper(op_name, supported=True):
         typ = args[0].checked_type
         if typ.dtype != "int8":
             return False
+
+        global conv2d_counter
+        if conv2d_counter == True:
+            conv2d_counter = False
+        logger.info(expr.span)
         return supported
 
     return _func_wrapper
 
 
-_register_external_op_helper("qnn.add")
-_register_external_op_helper("qnn.conv2d")
-_register_external_op_helper("qnn.relu")
+#_register_external_op_helper("qnn.add")
+#_register_external_op_helper("qnn.conv2d")
+#_register_external_op_helper("qnn.relu")
 
-
-def make_pattern(with_bias=True):
+# Special case to handle tflite models converted to relay with fused activation
+def qnn_tflite_conv2d_bias():
     data = wildcard()
     weight = wildcard()
     bias = wildcard()
-    conv = is_op('qnn.conv2d')(data, weight)
-    if with_bias:
-        conv_out = is_op('qnn.add')(conv, bias)
-    else:
-        conv_out = conv
-    return is_op('qnn.relu')(conv_out)
+    pattern = is_op("qnn.conv2d")(
+             data, weight, is_constant(), is_constant(), is_constant(), is_constant()
+    )
+    pattern = is_op("nn.bias_add")(pattern, bias)
+    return pattern
 
+def qnn_conv2d_pattern():
+    """Create pattern for qnn.conv2D with optional pad and/or optional fused relu."""
+    conv2d_input = wildcard()
+    qnn_conv2d = is_op("qnn.conv2d")(
+        conv2d_input,
+        is_constant(),
+        is_constant(),
+        is_constant(),
+        is_constant(),
+        is_constant(),
+    )
+    bias_add = is_op("nn.bias_add")(qnn_conv2d, is_constant())
+    req = is_op("qnn.requantize")(
+        qnn_conv2d | bias_add, is_constant(), is_constant(), is_constant(), is_constant()
+    )
+    clip_or_req = req.optional(is_op("clip"))
+    return clip_or_req
+
+def qnn_tflite_conv2d_bias_relu():
+    data = wildcard()
+    weight = wildcard()
+    bias = wildcard()
+    pattern = is_op("qnn.conv2d")(
+             data, is_constant(), is_constant(), is_constant(), is_constant(), is_constant()
+    )
+    pattern = is_op("nn.bias_add")(pattern, is_constant())
+    pattern = is_op("qnn.requantize")(
+          pattern, is_constant(), is_constant(), is_constant(), is_constant()
+    )
+    pattern = is_op("clip")(pattern)
+    return pattern
 
 @register_pattern_table("headsail")
 def pattern_table():
-    conv2d_bias_relu_pat = ("headsail.conv2d_bias_relu", make_pattern(with_bias=True))
-    conv2d_relu_pat = ("headsail.conv2d_relu", make_pattern(with_bias=False))
-    patterns = [conv2d_bias_relu_pat, conv2d_relu_pat]
-    return patterns
+    tflite_conv2d_bias_relu = ("headsail.tflite_conv2d_bias_relu", qnn_tflite_conv2d_bias_relu())
+    #tflite_conv2d_bias_relu = ("headsail.tflite_conv2d_bias_relu", qnn_conv2d_pattern(), check_qnn_conv2d)
+    #tflite_conv2d_bias= ("headsail.tflite_conv2d_bias", qnn_tflite_conv2d_bias())
+    return [tflite_conv2d_bias_relu]
+    #return [tflite_conv2d_bias_relu, tflite_conv2d_bias]
