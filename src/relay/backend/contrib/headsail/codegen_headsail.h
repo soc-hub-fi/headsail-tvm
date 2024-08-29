@@ -294,11 +294,7 @@ class HeadsailCodegenCBase {
                       const std::vector<Output>& outs) {
     // Create a declaration for global ndarrays that contain constant data.
     code_stream_ << "//This was generated with headsail codegen\n";
-    if (!const_arr_name.empty()) {
-      code_stream_ << "#ifdef __cplusplus\n";
-      code_stream_ << const_arr_name << "\n\n";
-      code_stream_ << "#endif\n";
-    }
+
     // Create the signature. For example, it could be:
     // void dnnl_0_(float* in0, float* in1, float* out0, float* out1) {}
     code_stream_ << "void " << ext_func_id << "_(";
@@ -311,6 +307,10 @@ class HeadsailCodegenCBase {
       code_stream_ << outs[i].dtype << "* out" << i << ", ";
     }
     code_stream_ << outs.back().dtype << "* out" << outs.size() - 1 << ") {\n";
+
+	// TODO: Constants here
+
+
     this->EnterScope();
 
     // Function body
@@ -392,20 +392,6 @@ class HeadsailCodegenCBase {
   }
 
   /*!
-   * \brief Creates a checker to check if the NDArray pool is initialized
-   *
-   * \param symobl The Symbol of the current function
-   *
-   * \return The created checker
-   */
-  std::string CreateInitChecker(const std::string& symbol) const {
-    std::ostringstream oss;
-    oss << "ICHECK(!" << symbol
-        << "_consts.empty()) << \"C source module hasn't been initialized.\";\n";
-    return oss.str();
-  }
-
-  /*!
    * \brief Generates the global ndarray pool declaration
    *
    * \param symobl The Symbol of the current function
@@ -425,7 +411,7 @@ class HeadsailCodegenCBase {
    * \return The created reference
    */
   std::string CreateDataReference(const std::string& symbol, size_t const_id) const {
-    return "(int*)(" + symbol + "_consts[" + std::to_string(const_id) + "]->data)";
+    return "(int*)sid_" + std::to_string(const_id + 1) + "_let";
   }
 
   /*!

@@ -78,7 +78,7 @@ std::vector<std::string> Conv2d_bias(const CallNode* call) {
   std::cout << "Data layout: " << data_layout << std::endl;
   args.push_back(data_layout);
 
-  std::cout << "Data layout: " << conv2d_attr->weight.c_str()<< std::endl;
+  //std::cout << "Data layout: " << conv2d_attr->weight.c_str()<< std::endl;
 
   args.push_back(std::to_string(wshape[0])); // Kernels amount
   std::cout << "Kernels amount: " << std::to_string(wshape[0]) << std::endl;
@@ -181,12 +181,6 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
 			ICHECK(type_node);
 			const auto& dtype = GetDtypeString(type_node);
 
-            // Generate the global variable for needed ndarrays
-            if (const_array_name_.empty()) {
-              const_array_name_ = CreateNDArrayPool(ext_func_id_);
-              std::string checker = CreateInitChecker(ext_func_id_);
-              ext_func_body_.insert(ext_func_body_.begin(), checker);
-            }
 
 			ICHECK(dtype == "int" || dtype == "int8_t") << "Only int8_t and int are supported for now.";
 			output.dtype = dtype;
