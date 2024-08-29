@@ -70,9 +70,9 @@ class CSourceModuleCodegenBase {
 };
 
 // The base class to generate the declaration functions in C.
-class CodegenCBase {
+class HeadsailCodegenCBase {
  public:
-  virtual ~CodegenCBase() {}
+  virtual ~HeadsailCodegenCBase() {}
 
  protected:
   /*! \brief Print indents using spaces. */
@@ -293,7 +293,7 @@ class CodegenCBase {
                       const std::vector<std::string>& body, const std::string& const_arr_name,
                       const std::vector<Output>& outs) {
     // Create a declaration for global ndarrays that contain constant data.
-    code_stream_ << "#//This was generated with headsail codegen\n";
+    code_stream_ << "//This was generated with headsail codegen\n";
     if (!const_arr_name.empty()) {
       code_stream_ << "#ifdef __cplusplus\n";
       code_stream_ << const_arr_name << "\n\n";
@@ -379,11 +379,11 @@ class CodegenCBase {
     } else if (runtime::TypeMatch(ttype->dtype, kDLInt, 32)) {
       dtype = "int";
     } else if (runtime::TypeMatch(ttype->dtype, kDLInt, 64)) {
-      dtype = "int64";
+      dtype = "int64_t";
     } else if (runtime::TypeMatch(ttype->dtype, kDLInt, 8)) {
-      dtype = "int8";
+      dtype = "int8_t";
     } else if (runtime::TypeMatch(ttype->dtype, kDLUInt, 8)) {
-      dtype = "uint8";
+      dtype = "uint8_t";
     } else {
       LOG(FATAL) << "Unsupported dtype " << ttype->dtype;
     }

@@ -30,7 +30,7 @@
 #include <cstring>
 
 #include "../../utils.h"
-#include "codegen_headsail.h"
+#include "./codegen_headsail.h"
 //#include "../codegen_c/codegen_c.h"
 #include "../../../../target/source/codegen_c_host.h"
 
@@ -78,6 +78,7 @@ std::vector<std::string> Conv2d_bias(const CallNode* call) {
   std::cout << "Data layout: " << data_layout << std::endl;
   args.push_back(data_layout);
 
+  std::cout << "Data layout: " << conv2d_attr->weight.c_str()<< std::endl;
 
   args.push_back(std::to_string(wshape[0])); // Kernels amount
   std::cout << "Kernels amount: " << std::to_string(wshape[0]) << std::endl;
@@ -128,17 +129,21 @@ std::vector<std::string> Conv2d_bias(const CallNode* call) {
 }
 
 
-class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, public CodegenCBase {
-
+class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, public HeadsailCodegenCBase {
     public:
-        explicit CodegenHeadsail(const std::string& id) { this->ext_func_id_ = id; }
+        //CodegenHeadsail(const std::string& id) { this->ext_func_id_ = id; }
+		CodegenHeadsail(std::unordered_map<std::string, runtime::NDArray>* const_name_to_constant,
+           Array<String>* const_names, std::string ext_func_id)
+      : const_name_to_constant_(const_name_to_constant),
+        const_names_(const_names),
+        ext_func_id_(std::move(ext_func_id)) {}
 
         std::vector<Output> VisitExprDefault_(const Object* op) final {
             LOG(FATAL) << "Headsail codegen doesn't support: " << op->GetTypeKey();
         }
 
         // Generates function parameter
-        std::vector<Output> VisitExpr_(const VarNode* node) override {
+        std::vector<Output> VisitExpr_(const VarNode* node) final {
             ext_func_args_.push_back(GetRef<Var>(node));
             Output output;
             output.name = node->name_hint();
@@ -167,9 +172,14 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
         std::vector<Output> VisitExpr_(const ConstantNode* cn) final {
             Output output;
 
+			size_t const_id = const_name_to_constant_->size();
+
             // Get const: static_cast<float*>(dnnl_0_consts[0]->data)
-            output.name = CreateDataReference(ext_func_id_, const_idx_);
-            output.dtype = "int8_t";
+            //output.name = CreateDataReference(ext_func_id_, const_idx_);
+            output.name = CreateDataReference(ext_func_id_, const_id);
+			const auto* type_node = cn->checked_type().as<TensorTypeNode>();
+			ICHECK(type_node);
+			const auto& dtype = GetDtypeString(type_node);
 
             // Generate the global variable for needed ndarrays
             if (const_array_name_.empty()) {
@@ -178,22 +188,33 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
               ext_func_body_.insert(ext_func_body_.begin(), checker);
             }
 
-            // Give the ndarray a unique name to ease the initialization of it at
-            // runtime.
-            std::string const_symbol = "headsail_" + ext_func_id_;
-            std::string const_var_name = CreateConstVar(const_symbol, const_idx_);
-            const_vars_.push_back(const_var_name);
-            const_idx_++;
+			ICHECK(dtype == "int" || dtype == "int8_t") << "Only int8_t and int are supported for now.";
+			output.dtype = dtype;
 
-            std::cout << "Const:" << const_symbol << std::endl;
+			std::string const_var_name = CreateConstVar(ext_func_id_, const_id);
+			std::cout << "Data:"  << cn->data << std::endl;
+			const_name_to_constant_->emplace(const_var_name, cn->data);
+			const_names_->push_back(const_var_name);
 
-            const auto* type_node = cn->checked_type().as<TensorTypeNode>();
-            ICHECK(GetDtypeString(type_node) == "int" || GetDtypeString(type_node) == "int8_t" );
+			return {output};
+            // ICHECK(GetDtypeString(type_node) == "int" || GetDtypeString(type_node) == "int8_t" );
 
-            return {output};
+            // // Give the ndarray a unique name to ease the initialization of it at
+            // // runtime.
+            // std::string const_symbol = "headsail_" + ext_func_id_;
+            // std::string const_var_name = CreateConstVar(const_symbol, const_idx_);
+            // const_vars_.push_back(const_var_name);
+            // const_idx_++;
+
+            // std::cout << "Const:" << const_symbol << std::endl;
+
+            // const auto* type_node = cn->checked_type().as<TensorTypeNode>();
+			// std::cout << "Type:" << GetDtypeString(type_node) << std::endl;
+
+            // return {output};
         }
 
-        std::vector<Output> VisitExpr_(const CallNode* call) override {
+        std::vector<Output> VisitExpr_(const CallNode* call) final {
             GenerateBodyOutput ret;
             if (const auto* func = call->op.as<FunctionNode>()) {
                 ret = GenerateCompositeFunctionCall(func, call);
@@ -207,7 +228,7 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
             return ret.outputs;
         }
 
-        std::string JIT(const std::vector<Output>& out) override {
+        std::string JIT(const std::vector<Output>& out) {
             return JitImpl(ext_func_id_, ext_func_args_, buf_decl_, ext_func_body_, const_array_name_, out);
         }
 
@@ -317,14 +338,21 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
             // Attach attribute arguments, op specific defined by the codegen
             for (size_t i = 0; i < attribute_args.size(); ++i) {
                 decl_stream << ", " << attribute_args[i];
+				std::cout << "Arg:" << attribute_args[i] << std::endl;
             }
             decl_stream << ");";
             ret.decl = func_name + decl_stream.str();
             return ret;
         }
 
+		/*!
+		* \brief The accumulated constant name to constant mapping. Shared between all generated
+		* functions.
+		*/
+		std::unordered_map<std::string, runtime::NDArray>* const_name_to_constant_;
+
         /*! \brief The id of the external dnnl ext_func. */
-        std::string ext_func_id_{""};
+        std::string ext_func_id_;
         /*!
         * \brief The index to track the output buffer. Each kernel will redirect the
         * output to a buffer that may be consumed by other kernels.
@@ -338,12 +366,10 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
         std::vector<std::string> ext_func_body_;
         /*! \brief The array declared to store the constant values. */
         std::string const_array_name_;
-        /*! \brief The accumulated constant name to constant mapping. */
-        std::unordered_map<std::string, runtime::NDArray> const_name_to_constant_;
         /*! \brief The declaration of intermeidate buffers. */
         std::vector<std::string> buf_decl_;
         /*! \brief The variable name to constant mapping. */
-        Array<String> const_vars_;
+        Array<String>* const_names_;
 
         friend class HeadsailModuleCodegen;
        };
@@ -358,12 +384,18 @@ class HeadsailModuleCodegen : public CSourceModuleCodegenBase {
     auto sid = GetExtSymbol(func);
     func_names_.push_back(sid);
 
-    CodegenHeadsail builder(sid);
+    CodegenHeadsail builder(&const_name_to_constant_, &const_names_, sid);
     auto out = builder.VisitExpr(func->body);
     code_stream_ << builder.JIT(out);
 
-    return {sid, builder.const_vars_};
+    return {sid, const_names_};
   }
+
+    /*! \brief Returns the accumulated constant name to constant mapping. */
+	const std::unordered_map<std::string, runtime::NDArray>& const_name_to_constant() const {
+		return const_name_to_constant_;
+	}
+
 
   /*!
    * \brief The overridden function that will create a CSourceModule. In order
@@ -408,9 +440,9 @@ class HeadsailModuleCodegen : public CSourceModuleCodegenBase {
     const auto* pf = runtime::Registry::Get("runtime.CSourceModuleCreate");
     ICHECK(pf != nullptr) << "Cannot find csource module to create the external runtime module";
     //// TODO(@manupa-arm): pass the function names to enable system-lib creation
-    return (*pf)(code, "c", Array<String>{sym}, variables);
+    //return (*pf)(code, "c", Array<String>{sym}, variables);
     // Use this if things break
-    //return codegen::CSourceModuleCreate(code, "c", variables);
+    return codegen::CSourceModuleCreate(code, "c", func_names_);
   }
 
  private:
@@ -420,6 +452,8 @@ class HeadsailModuleCodegen : public CSourceModuleCodegenBase {
    */
   std::ostringstream code_stream_;
   Array<String> func_names_;
+  std::unordered_map<std::string, runtime::NDArray> const_name_to_constant_;
+  Array<String> const_names_;
 };
 
 
@@ -429,53 +463,6 @@ runtime::Module HeadsailCompiler(const ObjectRef& ref) {
 }
 
 TVM_REGISTER_GLOBAL("relay.ext.headsail").set_body_typed(HeadsailCompiler);
-
-// struct HeadsailConstantUpdater : public ConstantUpdater {
-//  public:
-//   HeadsailConstantUpdater(const std::string& symbol,
-//                       std::unordered_map<std::string, runtime::NDArray>* params)
-//       : ConstantUpdater("dnnl_" + symbol, params) {}
-//   using ConstantUpdater::VisitExpr_;
-
-//   void VisitExpr_(const CallNode* cn) final {
-//     this->VisitSpan(cn->span);
-
-//     if (const auto* fn = cn->op.as<FunctionNode>()) {
-//       std::vector<Expr> args_loc;
-//       std::unordered_map<std::string, dmlc::any> attrs;
-//       auto root_cn = ParseComposite(*fn, &attrs, &args_loc);
-
-//       auto args = root_cn ? BindToCallNodeArgs(args_loc, cn) : cn->args;
-
-//       // Customized visit order of args
-//       for (const auto& arg : args) {
-//         this->VisitExpr(arg);
-//       }
-//     } else {
-//       // Original visit order of args
-//       for (auto arg : cn->args) {
-//         this->VisitExpr(arg);
-//       }
-//     }
-//   }
-// };
-// /*!
-//  * \brief The external compiler/codegen tool. It takes a Relay expression/module and
-//  * produce collection of required constant NDArrays.
-//  */
-// Map<String, runtime::NDArray> HeadsailConstantUpdaterFunc(Expr expr, std::string symbol) {
-//   // Visit all suitable constant nodes
-//   std::unordered_map<std::string, runtime::NDArray> res;
-//   HeadsailConstantUpdater const_updater(symbol, &res);
-//   const_updater(expr);
-
-//   // Convert to tvm::Map
-//   Map<String, runtime::NDArray> ret;
-//   for (const auto& kvp : res) ret.Set(kvp.first, kvp.second);
-//   return ret;
-// }
-
-// TVM_REGISTER_GLOBAL("relay.ext.headsail.constant_updater").set_body_typed(HeadsailConstantUpdaterFunc);
 
 
 }  // namespace contrib

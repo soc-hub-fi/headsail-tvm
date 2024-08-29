@@ -113,8 +113,10 @@ def qnn_tflite_conv2d_bias_relu():
     bias = wildcard()
     pattern = is_op("qnn.conv2d")(
              data, is_constant(), is_constant(), is_constant(), is_constant(), is_constant()
+             #data, weight, is_constant(), is_constant(), is_constant(), is_constant()
     )
     pattern = is_op("nn.bias_add")(pattern, is_constant())
+    #pattern = is_op("nn.bias_add")(pattern, bias)
     pattern = is_op("qnn.requantize")(
           pattern, is_constant(), is_constant(), is_constant(), is_constant()
     )
