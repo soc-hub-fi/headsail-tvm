@@ -411,7 +411,7 @@ class HeadsailCodegenCBase {
    * \return The created reference
    */
   std::string CreateDataReference(const std::string& symbol, size_t const_id) const {
-    return "(int*)sid_" + std::to_string(const_id + 1) + "_let";
+    return "(int*)(" + symbol + "_consts[" + std::to_string(const_id) + "]->data)";
   }
 
   /*!
@@ -423,6 +423,7 @@ class HeadsailCodegenCBase {
    * \return The created variable name
    */
   std::string CreateConstVar(const std::string& symbol, size_t const_id) const {
+	  // tvmgen_default_headsail_const_0 etc...
     return symbol + "_const_" + std::to_string(const_id);
   }
 

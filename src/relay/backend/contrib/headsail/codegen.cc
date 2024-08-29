@@ -147,6 +147,7 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
             ext_func_args_.push_back(GetRef<Var>(node));
             Output output;
             output.name = node->name_hint();
+			std::cout << "Input variable:" << output.name << std::endl;
             return {output};
         }
 
@@ -182,7 +183,8 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
 			const auto& dtype = GetDtypeString(type_node);
 
 
-			ICHECK(dtype == "int" || dtype == "int8_t") << "Only int8_t and int are supported for now.";
+			std::cout << "CONST DTYPE:" << dtype << std::endl;
+			//ICHECK(dtype == "int" || dtype == "int8_t") << "Only int8_t and int are supported for now.";
 			output.dtype = dtype;
 
 			std::string const_var_name = CreateConstVar(ext_func_id_, const_id);
@@ -245,7 +247,7 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
 
             using ArgFunType = std::function<std::vector<std::string>(const CallNode*)>;
             static const std::map<std::string, std::pair<std::string, ArgFunType>> op_map = {
-                //{"qnn.conv2d", {"dla_conv2d", Conv2d}},
+                //{"qnn.conv2d", {"dla_conv2d", Conv2d_bias}},
             };
 
             const auto op_name = GetRef<Op>(op_node)->name;
