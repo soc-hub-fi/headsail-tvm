@@ -319,7 +319,7 @@ def legalize_qnn_for_headsail(mod):
             transform.InferType(),
             # transform.SimplifyInference(),  # TODO: this pass decompose nn.layer_norm
             # transform.FoldScaleAxis(),  # TODO: fail inside TVM in case of grouped convolutions.
-            transform.FoldConstant(),
+            #transform.FoldConstant(),
         ]
     )
     with tvm.transform.PassContext(opt_level=3):
