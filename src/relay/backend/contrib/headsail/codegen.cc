@@ -59,15 +59,15 @@ std::vector<std::string> Conv2d_bias(const CallNode* call) {
   std::cout << std::endl;
   // args.push_back(std::to_string(ishape[0])); // Input batch
   // std::cout << "Input batch: " << std::to_string(ishape[0]) << std::endl;
+  //
+  args.push_back(std::to_string(ishape[3])); // Input channels
+  std::cout << "Input channel: " << std::to_string(ishape[3]) << std::endl;
 
   args.push_back(std::to_string(ishape[1])); // Input height
   std::cout << "Input height: " << std::to_string(ishape[1]) << std::endl;
 
   args.push_back(std::to_string(ishape[2])); // Input width
   std::cout << "Input width: " << std::to_string(ishape[2]) << std::endl;
-
-  args.push_back(std::to_string(ishape[3])); // Input channels
-  std::cout << "Input channel: " << std::to_string(ishape[3]) << std::endl;
 
   // Input layout
   char data_layout[6];
@@ -76,21 +76,23 @@ std::vector<std::string> Conv2d_bias(const CallNode* call) {
   std::strcat(data_layout, "\"");
 
   std::cout << "Data layout: " << data_layout << std::endl;
-  args.push_back(data_layout);
+  //args.push_back(data_layout);
+  args.push_back("\"CHW\"");
 
   //std::cout << "Data layout: " << conv2d_attr->weight.c_str()<< std::endl;
+  //
+  args.push_back(std::to_string(wshape[3])); // Kernels amount
+  std::cout << "Kernels amount: " << std::to_string(wshape[3]) << std::endl;
 
-  args.push_back(std::to_string(wshape[0])); // Kernels amount
-  std::cout << "Kernels amount: " << std::to_string(wshape[0]) << std::endl;
+  args.push_back(std::to_string(wshape[2])); // Kernels channels
+  std::cout << "Kernels channels: " << std::to_string(wshape[2]) << std::endl;
 
-  args.push_back(std::to_string(wshape[1])); // Kernels height
-  std::cout << "Kernels height: " << std::to_string(wshape[1]) << std::endl;
+  args.push_back(std::to_string(wshape[0])); // Kernels height
+  std::cout << "Kernels height: " << std::to_string(wshape[0]) << std::endl;
 
-  args.push_back(std::to_string(wshape[2])); // Kernels width
-  std::cout << "Kernels width: " << std::to_string(wshape[2]) << std::endl;
+  args.push_back(std::to_string(wshape[1])); // Kernels width
+  std::cout << "Kernels width: " << std::to_string(wshape[1]) << std::endl;
 
-  args.push_back(std::to_string(wshape[3])); // Kernels channels
-  std::cout << "Kernels channels: " << std::to_string(wshape[3]) << std::endl;
 
   // Kernel layout
   char kernel_layout[7];
@@ -101,13 +103,14 @@ std::vector<std::string> Conv2d_bias(const CallNode* call) {
   // Convert TVM layout string to Headsail layout string
   for (int i = 0; i < 7; ++i) {
     if (kernel_layout[i] == 'I') {
-      kernel_layout[i] = 'K';
-    } else if (kernel_layout[i] == 'O') {
       kernel_layout[i] = 'C';
+    } else if (kernel_layout[i] == 'O') {
+      kernel_layout[i] = 'K';
     }
   }
   std::cout << "Kernel layout: " << kernel_layout << std::endl;
-  args.push_back(kernel_layout);
+  //args.push_back(kernel_layout);
+  args.push_back("\"KCHW\"");
 
   std::cout << "Bias size: " << std::to_string(conv2d_attr->groups * wshape[3]) << std::endl;
   args.push_back(std::to_string(conv2d_attr->groups * wshape[3]));
@@ -119,10 +122,12 @@ std::vector<std::string> Conv2d_bias(const CallNode* call) {
   args.push_back(std::to_string(conv2d_attr->padding[2].as<IntImmNode>()->value)); // Pad bottom
   args.push_back(std::to_string(0));                                               // Pad value
 
+  std::cout << "Stride x: " << std::to_string(conv2d_attr->strides[0].as<IntImmNode>()->value) << std::endl;
+  std::cout << "Stride y: " << std::to_string(conv2d_attr->strides[1].as<IntImmNode>()->value) << std::endl;
   args.push_back(std::to_string(conv2d_attr->strides[0].as<IntImmNode>()->value)); // Stride x
   args.push_back(std::to_string(conv2d_attr->strides[1].as<IntImmNode>()->value)); // Stride y
   args.push_back(std::to_string(0));                                               // Mac clip
-  args.push_back(std::to_string(0));                                               // PP clip
+  args.push_back(std::to_string(4));                                               // PP clip
 
   return args;
 

@@ -101,7 +101,7 @@ def pattern_table():
     tflite_conv2d_bias_relu = ("headsail.tflite_conv2d_bias_relu", qnn_tflite_conv2d_bias_relu())
     #tflite_conv2d_bias= ("headsail.tflite_conv2d_bias", qnn_tflite_conv2d_bias())
     return [tflite_conv2d_bias_relu]
-    #return [tflite_conv2d_bias_relu, tflite_conv2d_bias]
+    #return [tflite_conv2d_bias_relu, tflite_conv2d_b//ias]
 
 class LegalizeQnnOpForHeadsail(DFPatternCallback):
     """Legalize QNN based patterns to match DNNL
