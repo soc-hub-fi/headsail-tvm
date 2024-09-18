@@ -17,12 +17,20 @@
  * under the License.
  */
 
+#include <tvm/ir/transform.h>
 #include <tvm/relay/attrs/nn.h>
 #include <tvm/relay/expr_functor.h>
 #include <tvm/relay/transform.h>
 #include <tvm/relay/type.h>
+#include <tvm/tir/builtin.h>
+#include <tvm/tir/expr.h>
+#include <tvm/tir/function.h>
+#include <tvm/tir/op.h>
+#include <tvm/tir/stmt_functor.h>
 #include <tvm/runtime/module.h>
 #include <tvm/runtime/registry.h>
+#include <tvm/relay/qnn/attrs.h>
+#include "../../../transforms/pattern_utils.h"
 
 #include <fstream>
 #include <sstream>
@@ -45,10 +53,48 @@ inline size_t GetShape1DSize(const Type& type) {
   return std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<int>());
 }
 
+/*!
+ * \brief Replace var expr which bind with args of call node
+ *
+ * \param args vector of expression (contains vars or constant nodes)
+ * \param cn call node which describe mapping of internal body vars with args
+ * \return updated vector of expressions
+ */
+static tvm::Array<Expr> BindToCallNodeArgs(const std::vector<Expr>& args, const CallNode* cn) {
+  tvm::Array<Expr> res;
+  for (const auto& arg : args) {
+    if (arg->IsInstance<ConstantNode>()) {
+      res.push_back(arg);
+    } else {
+      auto body_params = cn->op.as<FunctionNode>()->params;
+      auto found = std::find(body_params.begin(), body_params.end(), arg);
+      ICHECK(found != body_params.end());
+      auto idx = std::distance(body_params.begin(), found);
+      res.push_back(cn->args[idx]);
+    }
+  }
+  return res;
+}
 
 std::vector<std::string> Conv2d_bias(const CallNode* call) {
 
   std::vector<std::string> args;
+
+  const CallNode* clip_call = nullptr;
+  const CallNode* requantize_call = nullptr;
+  const CallNode* bias_add_call = nullptr;
+  const CallNode* conv2d_call = nullptr;
+
+  conv2d_call = call;
+  bias_add_call = call->args[0].as<CallNode>();
+  requantize_call = bias_add_call->args[0].as<CallNode>();
+  clip_call = requantize_call->args[0].as<CallNode>();
+
+  int32_t input_offset = -GetScalarFromConstant<int32_t>(conv2d_call->args[2]);
+  int32_t output_offset = GetScalarFromConstant<int32_t>(requantize_call->args[4]);
+
+  std::cout << std::to_string(input_offset) << std::endl;
+  std::cout << std::to_string(output_offset) << std::endl;
 
   const auto* conv2d_attr = call->attrs.as<Conv2DAttrs>();
   ICHECK(conv2d_attr);
@@ -77,7 +123,7 @@ std::vector<std::string> Conv2d_bias(const CallNode* call) {
 
   std::cout << "Data layout: " << data_layout << std::endl;
   //args.push_back(data_layout);
-  args.push_back("\"CHW\"");
+  args.push_back("\"HWC\"");
 
   //std::cout << "Data layout: " << conv2d_attr->weight.c_str()<< std::endl;
   //
@@ -110,7 +156,7 @@ std::vector<std::string> Conv2d_bias(const CallNode* call) {
   }
   std::cout << "Kernel layout: " << kernel_layout << std::endl;
   //args.push_back(kernel_layout);
-  args.push_back("\"KCHW\"");
+  args.push_back("\"HWCK\"");
 
   std::cout << "Bias size: " << std::to_string(conv2d_attr->groups * wshape[3]) << std::endl;
   args.push_back(std::to_string(conv2d_attr->groups * wshape[3]));
@@ -127,10 +173,8 @@ std::vector<std::string> Conv2d_bias(const CallNode* call) {
   args.push_back(std::to_string(conv2d_attr->strides[0].as<IntImmNode>()->value)); // Stride x
   args.push_back(std::to_string(conv2d_attr->strides[1].as<IntImmNode>()->value)); // Stride y
   args.push_back(std::to_string(0));                                               // Mac clip
-  args.push_back(std::to_string(4));                                               // PP clip
-
+  args.push_back(std::to_string(9));                                               // PP clip
   return args;
-
 }
 
 
