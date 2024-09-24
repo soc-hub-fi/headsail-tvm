@@ -44,6 +44,12 @@ struct Output {
   bool need_copy;
 };
 
+struct ExtractedConstArray {
+	std::string dtype;
+	int size;
+	std::vector<std::string> arr;
+};
+
 struct GenerateBodyOutput {
   std::string decl;
   std::vector<std::string> buffers;
@@ -175,9 +181,18 @@ class HeadsailCodegenCBase {
     for (size_t i = 0; i < args.size(); i++) {
       arg_types.push_back(GetDtypeString(args[i]));
     }
-    //return GenerateBackendCFunc(func_name, arg_types, const_arr_name, outs, pass_dl_tensor);
     return GenerateBackendCFunc(func_name, arg_types, const_arr_name, outs, pass_dl_tensor);
   }
+
+	std::string GenerateConstantArray(const std::string name, const ExtractedConstArray extracted) {
+		std::ostringstream stream;
+		stream << "  " << extracted.dtype << " " << name << "[" << std::to_string(extracted.size) << "]" << " = {";
+		for (const auto &x : extracted.arr) {
+			stream << x  <<", ";
+		}
+		stream << "};\n";
+		return stream.str();
+	}
 
   /*!
    * \brief Emit the code for external runtime.
@@ -205,6 +220,7 @@ class HeadsailCodegenCBase {
   std::string JitImpl(const std::string& ext_func_id, const Array<Var>& args,
                       const std::vector<std::string>& buf_decl,
                       const std::vector<std::string>& body, const std::string& const_arr_name,
+					  const std::unordered_map<std::string, ExtractedConstArray>& extracted_constants,
                       const std::vector<Output>& outs) {
     // Create a declaration for global ndarrays that contain constant data.
     code_stream_ << "//This was generated with headsail codegen\n";
@@ -223,7 +239,11 @@ class HeadsailCodegenCBase {
     code_stream_ << outs.back().dtype << "* out" << outs.size() - 1 << ") {\n";
 
 	// TODO: Constants here
-
+	for (auto const& x : extracted_constants) {
+		this->PrintIndents();
+		code_stream_ << GenerateConstantArray(x.first, x.second);
+		std::cout<< std::endl;
+	}
 
     this->EnterScope();
 

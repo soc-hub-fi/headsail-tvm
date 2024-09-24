@@ -85,10 +85,8 @@ def qnn_tflite_conv2d_bias_relu():
     weight = wildcard()
     bias = wildcard()
     pattern = is_op("qnn.conv2d")(
-             #data, is_constant(), is_constant(), is_constant(), is_constant(), is_constant()
              data, weight, is_constant(), is_constant(), is_constant(), is_constant()
     )
-    #pattern = is_op("nn.bias_add")(pattern, is_constant())
     pattern = is_op("nn.bias_add")(pattern, bias)
     pattern = is_op("qnn.requantize")(
           pattern, is_constant(), is_constant(), is_constant(), is_constant()
@@ -164,10 +162,10 @@ class LegalizeQnnOpForHeadsail(DFPatternCallback):
 
     def __init__(self):
         super(LegalizeQnnOpForHeadsail, self).__init__()
-        print("LEGALIZE _INIT_")
         self.src = wildcard()
         self.wgh = wildcard()
         self.bias = wildcard()
+        self.sum_src = wildcard()
 
         self.src_scl = is_constant()
         self.src_zp = is_constant()
@@ -179,64 +177,87 @@ class LegalizeQnnOpForHeadsail(DFPatternCallback):
         self.rq_out_scl = is_constant()
         self.rq_out_zp = is_constant()
 
-        self.root = is_op("qnn.conv2d")(
+        self.sum_lhs_scl = is_constant()
+        self.sum_lhs_zp = is_constant()
+        self.sum_rhs_scl = is_constant()
+        self.sum_rhs_zp = is_constant()
+        self.sum_out_scl = is_constant()
+        self.sum_out_zp = is_constant()
+
+        self.root = (is_op("qnn.conv2d") | is_op("qnn.dense"))(
             self.src, self.wgh, self.src_zp, self.wgh_zp, self.src_scl, self.wgh_scl
         )
-        pat = is_op("nn.bias_add")(self.root, self.bias) | self.root  # optional bias
+        pat = is_op("add")(self.root, self.bias) | self.root  # optional bias
         pat = is_op("qnn.requantize")(
             pat, self.rq_in_scl, self.rq_in_zp, self.rq_out_scl, self.rq_out_zp
         )
         pat = is_op("clip")(pat)
-        self.pattern = pat
+        cast = is_op("cast")(pat)
+        pat = is_op("qnn.add")(
+            cast,
+            self.sum_src,
+            self.sum_lhs_scl,
+            self.sum_lhs_zp,
+            self.sum_rhs_scl,
+            self.sum_rhs_zp,
+            self.sum_out_scl,
+            self.sum_out_zp,
+        )
+        pat = is_op("clip")(pat)
+        self.pattern = pat | cast
 
     def callback(self, pre, post, node_map):
-        print("HERE!!!!!!!!!!!!!!!!!!!!")
         root = node_map[self.root][0]
         src = node_map[self.src][0]
         wgh = node_map[self.wgh][0]
         bias = node_map.get(self.bias, default=[relay.const(0, dtype="int32")])[0]
         src_zp = node_map[self.src_zp][0]
-        input_scale = node_map[self.rq_in_scl][0]
-        input_zp = node_map[self.rq_in_zp][0]
-        out_scale = node_map[self.rq_out_scl][0]
-        out_zp = node_map[self.rq_out_zp][0]
+        rq_in_scl = node_map[self.rq_in_scl][0]
+        rq_in_zp = node_map[self.rq_in_zp][0]
+        rq_out_scl = node_map[self.rq_out_scl][0]
+        rq_out_zp = node_map[self.rq_out_zp][0]
 
-        print("src_zp", src_zp)
-        print("input_scale", input_scale)
-        print("input_zp", input_zp)
-        print("out_scale", out_scale)
-        print("out_zp", out_zp)
+        final_dtype = node_map[self.pattern][0].checked_type.dtype
 
-
-
-        #final_dtype = node_map[self.pattern][0].checked_type.dtype
-        final_dtype = "int8"
-
-        dst_layout = root.attrs.out_layout
-        dst_layout = root.attrs.data_layout if dst_layout == "" else dst_layout
-        wgh_layout = root.attrs.kernel_layout
+        if root.op == relay.op.get("qnn.conv2d"):
+            dst_layout = root.attrs.out_layout
+            dst_layout = root.attrs.data_layout if dst_layout == "" else dst_layout
+            wgh_layout = root.attrs.kernel_layout
+        else:
+            # qnn.dense has no layout attributes. Assume that is plain
+            dst_layout = "NC"
+            wgh_layout = "OI"
 
         # TODO(@apeskov): dst_layout may ne blocked
         bias_rank = len(dst_layout) - dst_layout.index("C")
 
+        sum_src = node_map[self.sum_src][0] if self.sum_src in node_map else None
+        # Default values if qnn.sum is not present
+        sum_lhs_scl = node_map[self.sum_lhs_scl][0] if sum_src else relay.const(1, dtype="float32")
+        sum_lhs_zp = node_map[self.sum_lhs_zp][0] if sum_src else relay.const(0, dtype="int32")
+        sum_rhs_scl = node_map[self.sum_rhs_scl][0] if sum_src else relay.const(0, dtype="float32")
+        sum_rhs_zp = node_map[self.sum_rhs_zp][0] if sum_src else relay.const(0, dtype="int32")
+        sum_out_scl = node_map[self.sum_out_scl][0] if sum_src else relay.const(1, dtype="float32")
+        sum_out_zp = node_map[self.sum_out_zp][0] if sum_src else relay.const(0, dtype="int32")
 
         def cast_fp(op):
             return relay.op.cast(op, dtype="float32")
 
         # recalculate some factors
-        o_scl = input_scale / out_scale # Output scale
-        #sum_scl = sum_rhs_scl / sum_out_scl
-        # dst_zp = (
-        #     cast_fp(sum_out_zp)
-        #     - cast_fp(sum_lhs_zp) * sum_lhs_scl / sum_out_scl
-        #     - cast_fp(sum_rhs_zp) * sum_rhs_scl / sum_out_scl
-        # )
+        o_scl = rq_in_scl / rq_out_scl
+        act_scl = sum_lhs_scl / sum_out_scl
+        sum_scl = sum_rhs_scl / sum_out_scl
+        dst_zp = (
+            cast_fp(sum_out_zp)
+            - cast_fp(sum_lhs_zp) * sum_lhs_scl / sum_out_scl
+            - cast_fp(sum_rhs_zp) * sum_rhs_scl / sum_out_scl
+        )
         bias = self.squeeze_bias(bias, dst_layout)
         bias = (
             cast_fp(bias)
             - cast_fp(self.fake_op(src_zp, wgh, wgh_layout))
-            - cast_fp(input_zp)
-            + cast_fp(out_zp) * out_scale / input_scale
+            - cast_fp(rq_in_zp)
+            + cast_fp(rq_out_zp) * rq_out_scl / rq_in_scl
         )
         bias = self.broadcast_to_rank(bias, bias_rank)
 
@@ -251,12 +272,12 @@ class LegalizeQnnOpForHeadsail(DFPatternCallback):
             root.type_args,
             root.span,
         )
-        #gr = relay.op.cast(gr, dtype="float32")
+        gr = relay.op.cast(gr, dtype="float32")
         gr = gr + bias
         gr = gr * o_scl
-        #gr = relay.op.clip(gr, 0, 255) * act_scl
-        #gr = gr + sum_scl * cast_fp(sum_src) if sum_src else gr
-        #gr = gr + dst_zp
+        gr = relay.op.clip(gr, 0, 255) * act_scl
+        gr = gr + sum_scl * cast_fp(sum_src) if sum_src else gr
+        gr = gr + dst_zp
         gr = relay.op.cast(gr, dtype=final_dtype)
         return gr
 
@@ -287,6 +308,7 @@ class LegalizeQnnOpForHeadsail(DFPatternCallback):
         if len(shape) == 1:
             return relay.op.expand_dims(op, 1, rank - 1)
         raise ValueError("Unexpected bias rank to broadcast. Only 0 and 1 are supported.")
+
 
 def legalize_qnn_for_headsail(mod):
     """Transform qnn primitives to DNNL compatible form. Eliminate source zero point and apply

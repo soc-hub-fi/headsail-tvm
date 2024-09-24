@@ -48,133 +48,15 @@ namespace contrib {
 
 using namespace backend;
 
+struct CompositeCallables {
+    std::vector<std::string> passed_args; // Args used in wrapped call
+    std::vector<std::string> static_args; // Static arguments used in function call
+};
+
+
 inline size_t GetShape1DSize(const Type& type) {
   const auto shape = GetShape(type);
   return std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<int>());
-}
-
-/*!
- * \brief Replace var expr which bind with args of call node
- *
- * \param args vector of expression (contains vars or constant nodes)
- * \param cn call node which describe mapping of internal body vars with args
- * \return updated vector of expressions
- */
-static tvm::Array<Expr> BindToCallNodeArgs(const std::vector<Expr>& args, const CallNode* cn) {
-  tvm::Array<Expr> res;
-  for (const auto& arg : args) {
-    if (arg->IsInstance<ConstantNode>()) {
-      res.push_back(arg);
-    } else {
-      auto body_params = cn->op.as<FunctionNode>()->params;
-      auto found = std::find(body_params.begin(), body_params.end(), arg);
-      ICHECK(found != body_params.end());
-      auto idx = std::distance(body_params.begin(), found);
-      res.push_back(cn->args[idx]);
-    }
-  }
-  return res;
-}
-
-std::vector<std::string> Conv2d_bias(const CallNode* call) {
-
-  std::vector<std::string> args;
-
-  const CallNode* clip_call = nullptr;
-  const CallNode* requantize_call = nullptr;
-  const CallNode* bias_add_call = nullptr;
-  const CallNode* conv2d_call = nullptr;
-
-  conv2d_call = call;
-  bias_add_call = call->args[0].as<CallNode>();
-  requantize_call = bias_add_call->args[0].as<CallNode>();
-  clip_call = requantize_call->args[0].as<CallNode>();
-
-  int32_t input_offset = -GetScalarFromConstant<int32_t>(conv2d_call->args[2]);
-  int32_t output_offset = GetScalarFromConstant<int32_t>(requantize_call->args[4]);
-
-  std::cout << std::to_string(input_offset) << std::endl;
-  std::cout << std::to_string(output_offset) << std::endl;
-
-  const auto* conv2d_attr = call->attrs.as<Conv2DAttrs>();
-  ICHECK(conv2d_attr);
-
-  auto ishape = GetShape(call->args[0]->checked_type()); // Input shape
-  auto wshape = GetShape(call->args[1]->checked_type()); // Kernel shape
-
-  std::cout << std::endl;
-  // args.push_back(std::to_string(ishape[0])); // Input batch
-  // std::cout << "Input batch: " << std::to_string(ishape[0]) << std::endl;
-  //
-  args.push_back(std::to_string(ishape[3])); // Input channels
-  std::cout << "Input channel: " << std::to_string(ishape[3]) << std::endl;
-
-  args.push_back(std::to_string(ishape[1])); // Input height
-  std::cout << "Input height: " << std::to_string(ishape[1]) << std::endl;
-
-  args.push_back(std::to_string(ishape[2])); // Input width
-  std::cout << "Input width: " << std::to_string(ishape[2]) << std::endl;
-
-  // Input layout
-  char data_layout[6];
-  std::strcpy(data_layout, "\"");
-  std::strcat(data_layout, &conv2d_attr->data_layout.c_str()[1]);
-  std::strcat(data_layout, "\"");
-
-  std::cout << "Data layout: " << data_layout << std::endl;
-  //args.push_back(data_layout);
-  args.push_back("\"HWC\"");
-
-  //std::cout << "Data layout: " << conv2d_attr->weight.c_str()<< std::endl;
-  //
-  args.push_back(std::to_string(wshape[3])); // Kernels amount
-  std::cout << "Kernels amount: " << std::to_string(wshape[3]) << std::endl;
-
-  args.push_back(std::to_string(wshape[2])); // Kernels channels
-  std::cout << "Kernels channels: " << std::to_string(wshape[2]) << std::endl;
-
-  args.push_back(std::to_string(wshape[0])); // Kernels height
-  std::cout << "Kernels height: " << std::to_string(wshape[0]) << std::endl;
-
-  args.push_back(std::to_string(wshape[1])); // Kernels width
-  std::cout << "Kernels width: " << std::to_string(wshape[1]) << std::endl;
-
-
-  // Kernel layout
-  char kernel_layout[7];
-  std::strcpy(kernel_layout, "\"");
-  std::strcat(kernel_layout, conv2d_attr->kernel_layout.c_str());
-  std::strcat(kernel_layout, "\"");
-
-  // Convert TVM layout string to Headsail layout string
-  for (int i = 0; i < 7; ++i) {
-    if (kernel_layout[i] == 'I') {
-      kernel_layout[i] = 'C';
-    } else if (kernel_layout[i] == 'O') {
-      kernel_layout[i] = 'K';
-    }
-  }
-  std::cout << "Kernel layout: " << kernel_layout << std::endl;
-  //args.push_back(kernel_layout);
-  args.push_back("\"HWCK\"");
-
-  std::cout << "Bias size: " << std::to_string(conv2d_attr->groups * wshape[3]) << std::endl;
-  args.push_back(std::to_string(conv2d_attr->groups * wshape[3]));
-
-  // Padding
-  args.push_back(std::to_string(conv2d_attr->padding[0].as<IntImmNode>()->value)); // Pad top
-  args.push_back(std::to_string(conv2d_attr->padding[1].as<IntImmNode>()->value)); // Pad left
-  args.push_back(std::to_string(conv2d_attr->padding[3].as<IntImmNode>()->value)); // Pad right
-  args.push_back(std::to_string(conv2d_attr->padding[2].as<IntImmNode>()->value)); // Pad bottom
-  args.push_back(std::to_string(0));                                               // Pad value
-
-  std::cout << "Stride x: " << std::to_string(conv2d_attr->strides[0].as<IntImmNode>()->value) << std::endl;
-  std::cout << "Stride y: " << std::to_string(conv2d_attr->strides[1].as<IntImmNode>()->value) << std::endl;
-  args.push_back(std::to_string(conv2d_attr->strides[0].as<IntImmNode>()->value)); // Stride x
-  args.push_back(std::to_string(conv2d_attr->strides[1].as<IntImmNode>()->value)); // Stride y
-  args.push_back(std::to_string(0));                                               // Mac clip
-  args.push_back(std::to_string(9));                                               // PP clip
-  return args;
 }
 
 
@@ -187,10 +69,129 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
         const_names_(const_names),
         ext_func_id_(std::move(ext_func_id)) {}
 
+
+		CompositeCallables Conv2d_bias(const FunctionNode* callee) {
+
+			CompositeCallables callables;
+
+			const ClipAttrs* clip_attr = nullptr;
+			const qnn::RequantizeAttrs* requantize_attr = nullptr;
+			const BiasAddAttrs* bias_attr = nullptr;
+			const Conv2DAttrs* conv2d_attr = nullptr;
+
+			const auto* current_call = callee->body.as<CallNode>();
+
+
+			if (backend::IsOp(current_call, "clip")) {
+				std::cout << "CLIP!!!!!!!!!!!!!" << std::endl;
+				clip_attr = current_call->attrs.as<ClipAttrs>();
+				current_call = current_call->args[0].as<CallNode>();
+				ICHECK(clip_attr);
+			}
+			if (backend::IsOp(current_call, "qnn.requantize")) {
+				std::cout << "REQ!!!!!!!!!!!!!" << std::endl;
+				requantize_attr = current_call->attrs.as<qnn::RequantizeAttrs>();
+
+				// Input scale
+				for (auto const& arg : VisitExpr(current_call->args[1])) {
+					callables.static_args.push_back(arg.name); // Const calls
+				}
+
+				// Input zero
+				for (auto const& arg : VisitExpr(current_call->args[2])) {
+					callables.static_args.push_back(arg.name); // Const calls
+				}
+
+				// Output zero
+				for (auto const& arg : VisitExpr(current_call->args[3])) {
+					callables.static_args.push_back(arg.name); // Const calls
+				}
+
+				// Output scale
+				for (auto const& arg : VisitExpr(current_call->args[4])) {
+					callables.static_args.push_back(arg.name); // Const calls
+				}
+				current_call = current_call->args[0].as<CallNode>();
+				ICHECK(requantize_attr);
+			}
+
+			if (backend::IsOp(current_call, "nn.bias_add")) {
+				std::cout << "BIAS!!!!!!!!!!!!!" << std::endl;
+				bias_attr = current_call->attrs.as<BiasAddAttrs>();
+				current_call = current_call->args[0].as<CallNode>();
+				ICHECK(bias_attr);
+			}
+
+			if (backend::IsOp(current_call, "qnn.conv2d")) {
+				std::cout << "CONV!!!!!!!!!!!!!" << std::endl;
+				//auto conv2d_args = GetArgumentNames(callee->body.as<CallNode>());
+				//callables.passed_args.insert(callables.passed_args.end(), conv2d_args.begin(), conv2d_args.end());
+				conv2d_attr = current_call->attrs.as<Conv2DAttrs>();
+				ICHECK(conv2d_attr);
+			}
+
+			auto ishape = GetShape(current_call->args[0]->checked_type());  // Input shape
+			auto wshape = GetShape(current_call->args[1]->checked_type()); // Kernel shape
+
+			std::cout << std::endl;
+			callables.static_args.push_back(std::to_string(ishape[3])); // Input channels
+			callables.static_args.push_back(std::to_string(ishape[1])); // Input height
+			callables.static_args.push_back(std::to_string(ishape[2])); // Input width
+
+			// Input layout
+			char data_layout[6];
+			std::strcpy(data_layout, "\"");
+			std::strcat(data_layout, &conv2d_attr->data_layout.c_str()[1]);
+			std::strcat(data_layout, "\"");
+
+			std::cout << "Data layout: " << data_layout << std::endl;
+			//callables.static_args.push_back(data_layout);
+			callables.static_args.push_back("\"HWC\"");
+
+			callables.static_args.push_back(std::to_string(wshape[3])); // Kernels amount
+			callables.static_args.push_back(std::to_string(wshape[2])); // Kernels channels
+			callables.static_args.push_back(std::to_string(wshape[0])); // Kernels height
+			callables.static_args.push_back(std::to_string(wshape[1])); // Kernels width
+
+
+			// Kernel layout
+			char kernel_layout[7];
+			std::strcpy(kernel_layout, "\"");
+			std::strcat(kernel_layout, conv2d_attr->kernel_layout.c_str());
+			std::strcat(kernel_layout, "\"");
+
+			// Convert TVM layout string to Headsail layout string
+			for (int i = 0; i < 7; ++i) {
+				if (kernel_layout[i] == 'I') {
+				kernel_layout[i] = 'C';
+				} else if (kernel_layout[i] == 'O') {
+				kernel_layout[i] = 'K';
+				}
+			}
+			//callables.static_args.push_back(kernel_layout);
+			callables.static_args.push_back("\"HWCK\"");
+
+			callables.static_args.push_back(std::to_string(conv2d_attr->groups * wshape[3]));
+
+			// Padding
+			callables.static_args.push_back(std::to_string(conv2d_attr->padding[0].as<IntImmNode>()->value)); // Pad top
+			callables.static_args.push_back(std::to_string(conv2d_attr->padding[1].as<IntImmNode>()->value)); // Pad left
+			callables.static_args.push_back(std::to_string(conv2d_attr->padding[3].as<IntImmNode>()->value)); // Pad right
+			callables.static_args.push_back(std::to_string(conv2d_attr->padding[2].as<IntImmNode>()->value)); // Pad bottom
+			callables.static_args.push_back(std::to_string(0));                                               // Pad value
+
+			callables.static_args.push_back(std::to_string(conv2d_attr->strides[0].as<IntImmNode>()->value)); // Stride x
+			callables.static_args.push_back(std::to_string(conv2d_attr->strides[1].as<IntImmNode>()->value)); // Stride y
+			callables.static_args.push_back(std::to_string(0));                                               // Mac clip
+			callables.static_args.push_back(std::to_string(8));                                               // PP clip
+
+			return callables;
+		}
+
+
         std::vector<Output> VisitExprDefault_(const Object* op) final {
             LOG(FATAL) << "Headsail codegen doesn't support: " << op->GetTypeKey();
         }
-
         // Generates function parameter
         std::vector<Output> VisitExpr_(const VarNode* node) final {
             ext_func_args_.push_back(GetRef<Var>(node));
@@ -203,9 +204,9 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
         std::vector<Output> VisitExpr_(const TupleNode* node) final {
             std::vector<Output> outs;
             for (auto field : node->fields) {
-            auto res = VisitExpr(field);
-            ICHECK_EQ(res.size(), 1U) << "Do not support tuple nest";
-            outs.push_back(res[0]);
+				auto res = VisitExpr(field);
+				ICHECK_EQ(res.size(), 1U) << "Do not support tuple nest";
+				outs.push_back(res[0]);
             }
             return outs;
         }
@@ -224,39 +225,56 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
 
 			size_t const_id = const_name_to_constant_->size();
 
-            // Get const: static_cast<float*>(dnnl_0_consts[0]->data)
-            //output.name = CreateDataReference(ext_func_id_, const_idx_);
-            output.name = CreateDataReference(ext_func_id_, const_id);
+            //output.name = CreateDataReference(ext_func_id_, const_id);
 			const auto* type_node = cn->checked_type().as<TensorTypeNode>();
 			ICHECK(type_node);
 			const auto& dtype = GetDtypeString(type_node);
 
-
-			std::cout << "CONST DTYPE:" << dtype << std::endl;
-			//ICHECK(dtype == "int" || dtype == "int8_t") << "Only int8_t and int are supported for now.";
 			output.dtype = dtype;
 
 			std::string const_var_name = CreateConstVar(ext_func_id_, const_id);
-			std::cout << "Data:"  << cn->data << std::endl;
+			output.name = const_var_name;
+
+			std::vector<std::string> constant_values;
+
+			tvm::runtime::NDArray data = cn->data;
+
+			int ndim = data->ndim;
+			int num_elements = 1;
+			for (int i = 0; i < ndim; i++) {
+				num_elements *= data->shape[i];
+			}
+
+
+			// Extract constant values
+			if (data->dtype.code == kDLFloat && data->dtype.bits == 32) {
+				const float* values = static_cast<const float*>(data->data);
+                // // Convert the constant values to string and push to vector
+				for (int64_t i = 0; i < num_elements; ++i) {
+					//std::cout << "D:"  << std::to_string(values[i]) << std::endl;
+				    constant_values.push_back(std::to_string(values[i]));
+				}
+			}
+			else if (data->dtype.code == kDLInt && data->dtype.bits == 32) {
+				const int* values = static_cast<const int*>(data->data);
+				// // Convert the constant values to string and push to vector
+				for (int64_t i = 0; i < num_elements; ++i) {
+					//std::cout << "D:"  << std::to_string(values[i]) << std::endl;
+				    constant_values.push_back(std::to_string(values[i]));
+				}
+			}
+
+			ExtractedConstArray extracted;
+			extracted.arr = constant_values;
+			extracted.dtype = dtype;
+			extracted.size = num_elements;
+
+
+			extracted_constants.insert({const_var_name, extracted});
 			const_name_to_constant_->emplace(const_var_name, cn->data);
 			const_names_->push_back(const_var_name);
 
 			return {output};
-            // ICHECK(GetDtypeString(type_node) == "int" || GetDtypeString(type_node) == "int8_t" );
-
-            // // Give the ndarray a unique name to ease the initialization of it at
-            // // runtime.
-            // std::string const_symbol = "headsail_" + ext_func_id_;
-            // std::string const_var_name = CreateConstVar(const_symbol, const_idx_);
-            // const_vars_.push_back(const_var_name);
-            // const_idx_++;
-
-            // std::cout << "Const:" << const_symbol << std::endl;
-
-            // const auto* type_node = cn->checked_type().as<TensorTypeNode>();
-			// std::cout << "Type:" << GetDtypeString(type_node) << std::endl;
-
-            // return {output};
         }
 
         std::vector<Output> VisitExpr_(const CallNode* call) final {
@@ -274,11 +292,12 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
         }
 
         std::string JIT(const std::vector<Output>& out) {
-            return JitImpl(ext_func_id_, ext_func_args_, buf_decl_, ext_func_body_, const_array_name_, out);
+            return JitImpl(ext_func_id_, ext_func_args_, buf_decl_, ext_func_body_, const_array_name_, extracted_constants, out);
         }
 
 
     private:
+		// TODO: Fix this to parse composite
         std::vector<std::string> GetArgumentNames(const CallNode* call) {
             std::vector<std::string> arg_names;
             for (size_t i = 0; i < call->args.size(); ++i) {
@@ -308,6 +327,7 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
             LOG(FATAL) << "Unsupported op: " << AsText(call->op, false);
         }
 
+
         GenerateBodyOutput GenerateCompositeFunctionCall(const FunctionNode* callee,
                                                         const CallNode* caller) {
             const auto pattern_name = callee->GetAttr<runtime::String>(attr::kComposite);
@@ -316,14 +336,9 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
             if (pattern_name == "headsail.tflite_conv2d_bias_relu") {
                 const auto* conv_call = GetRootCall(callee->body.as<CallNode>(), 3,
                                                     (const std::vector<std::string>){"qnn.conv2d", "nn.bias_add", "qnn.requantize", "clip"});
-                return GenerateBody(conv_call, "dla_conv2d_bias_relu", GetArgumentNames(caller),
-                                    Conv2d_bias(conv_call));
-            } else if (pattern_name == "headsail.tflite_conv2d_bias") {
-                const auto* conv_call =
-                    GetRootCall(callee->body.as<CallNode>(), 1, {"qnn.conv2d", "nn.bias_add", ""});
-                return GenerateBody(conv_call, "dla_conv2d_bias", GetArgumentNames(caller),
-                                    Conv2d_bias(conv_call));
-            }
+				CompositeCallables callables = Conv2d_bias(callee);
+                return GenerateBody(conv_call, "dla_tvm_qnn_conv2d", GetArgumentNames(caller), callables.static_args);
+           }
 
             LOG(FATAL) << "Unknown composite function:" << pattern_name;
         }
@@ -340,12 +355,11 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
             ICHECK_GT(func_args.size(), 0);
             std::ostringstream decl_stream;
 
-            // Constant arguments i.e. input, weight, output
+            // Wildcard arguments i.e. input, weight, output
             decl_stream << "(" << func_args[0];
             for (size_t i = 1; i < func_args.size(); ++i) {
                 decl_stream << ", " << func_args[i];
             }
-            std::cout << "decl: " << decl_stream.str() << std::endl;
 
             // Analyze the output buffers
             std::vector<Type> out_types;
@@ -362,6 +376,7 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
                 LOG(FATAL) << "Unrecognized type node: " << AsText(root_call->checked_type(), false);
             }
 
+			// Generate buffers to hold results
             GenerateBodyOutput ret;
             for (const auto& out_type : out_types) {
                 this->PrintIndents();
@@ -374,7 +389,6 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
                 output.size = out_size;
                 output.dtype = GetDtypeString(out_type.as<TensorTypeNode>());
                 output.need_copy = true;
-                // NOTE: This needs to be extended for int16_t
                 ret.buffers.push_back("int8_t* " + out + " = (int8_t*)malloc(" +
                                         std::to_string(out_size) + ");");
                 ret.outputs.push_back(output);
@@ -383,7 +397,6 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
             // Attach attribute arguments, op specific defined by the codegen
             for (size_t i = 0; i < attribute_args.size(); ++i) {
                 decl_stream << ", " << attribute_args[i];
-				std::cout << "Arg:" << attribute_args[i] << std::endl;
             }
             decl_stream << ");";
             ret.decl = func_name + decl_stream.str();
@@ -395,6 +408,7 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
 		* functions.
 		*/
 		std::unordered_map<std::string, runtime::NDArray>* const_name_to_constant_;
+		std::unordered_map<std::string, ExtractedConstArray> extracted_constants;
 
         /*! \brief The id of the external dnnl ext_func. */
         std::string ext_func_id_;
