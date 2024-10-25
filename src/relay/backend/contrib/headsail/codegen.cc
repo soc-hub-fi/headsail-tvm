@@ -389,6 +389,7 @@ CompositeCallables Conv2d_bias(const FunctionNode* callee) {
             // Attach attribute arguments, op specific defined by the codegen
             for (size_t i = 0; i < attribute_args.size(); ++i) {
                 decl_stream << ", " << attribute_args[i];
+				std::cout << "Arg:" << attribute_args[i] << std::endl;
             }
             decl_stream << ");";
             ret.decl = func_name + decl_stream.str();
@@ -417,8 +418,6 @@ CompositeCallables Conv2d_bias(const FunctionNode* callee) {
         std::vector<std::string> ext_func_body_;
         /*! \brief The array declared to store the constant values. */
         std::string const_array_name_;
-        /*! \brief The accumulated constant name to constant mapping. */
-        std::unordered_map<std::string, runtime::NDArray> const_name_to_constant_;
         /*! \brief The declaration of intermeidate buffers. */
         std::vector<std::string> buf_decl_;
         /*! \brief The variable name to constant mapping. */
