@@ -72,38 +72,31 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
 CompositeCallables Conv2d_bias(const FunctionNode* callee) {
 
 			CompositeCallables callables;
-
-			//const BiasAddAttrs* bias_attr = nullptr;
 			const Conv2DAttrs* conv2d_attr = nullptr;
 
 			const auto* current_call = callee->body.as<CallNode>();
 
 
 			if (backend::IsOp(current_call, "add")) {
-			//if (backend::IsOp(current_call, "nn.bias_add")) {
 				std::cout << "BIAS!!!!!!!!!!!!!" << std::endl;
-				//bias_attr = current_call->attrs.as<BiasAddAttrs>();
 				current_call = current_call->args[0].as<CallNode>();
-				//ICHECK(bias_attr);
 			}
 
 			if (backend::IsOp(current_call, "qnn.conv2d")) {
 				std::cout << "CONV!!!!!!!!!!!!!" << std::endl;
 
-				// Input zero point
-				for (auto const& arg : VisitExpr(current_call->args[2])) {
-					std::cout << "ARG:" << arg.name << std::endl;
-					callables.static_args.push_back(arg.name); // Const calls
-				}
+				// // Input zero point
+				// for (auto const& arg : VisitExpr(current_call->args[2])) {
+				// 	std::cout << "ARG:" << arg.name << std::endl;
+				// 	callables.static_args.push_back(arg.name); // Const calls
+				// }
 
-				// Input scale
-				for (auto const& arg : VisitExpr(current_call->args[4])) {
-					std::cout << "ARG:" << arg.name << std::endl;
-					callables.static_args.push_back(arg.name); // Const calls
-				}
+				// // Input scale
+				// for (auto const& arg : VisitExpr(current_call->args[4])) {
+				// 	std::cout << "ARG:" << arg.name << std::endl;
+				// 	callables.static_args.push_back(arg.name); // Const calls
+				// }
 
-				//auto conv2d_args = GetArgumentNames(callee->body.as<CallNode>());
-				//callables.passed_args.insert(callables.passed_args.end(), conv2d_args.begin(), conv2d_args.end());
 				conv2d_attr = current_call->attrs.as<Conv2DAttrs>();
 				ICHECK(conv2d_attr);
 			}
@@ -161,7 +154,7 @@ CompositeCallables Conv2d_bias(const FunctionNode* callee) {
 			callables.static_args.push_back(std::to_string(conv2d_attr->strides[0].as<IntImmNode>()->value)); // Stride x
 			callables.static_args.push_back(std::to_string(conv2d_attr->strides[1].as<IntImmNode>()->value)); // Stride y
 			callables.static_args.push_back(std::to_string(0));                                               // Mac clip
-			callables.static_args.push_back(std::to_string(0));                                               // PP clip
+			callables.static_args.push_back(std::to_string(7));                                               // PP clip
 
 			return callables;
 		}
