@@ -115,10 +115,10 @@ class LegalizeQnnOpForHeadsail(DFPatternCallback):
 
     def __init__(self):
         super(LegalizeQnnOpForHeadsail, self).__init__()
-        print("LEGALIZE _INIT_")
         self.src = wildcard()
         self.wgh = wildcard()
         self.bias = wildcard()
+        self.sum_src = wildcard()
 
         self.src_scl = is_constant()
         self.src_zp = is_constant()
@@ -141,7 +141,7 @@ class LegalizeQnnOpForHeadsail(DFPatternCallback):
         self.root = (is_op("qnn.conv2d") | is_op("qnn.dense"))(
             self.src, self.wgh, self.src_zp, self.wgh_zp, self.src_scl, self.wgh_scl
         )
-        pat = is_op("nn.bias_add")(self.root, self.bias) | self.root  # optional bias
+        pat = is_op("add")(self.root, self.bias) | self.root  # optional bias
         pat = is_op("qnn.requantize")(
             pat, self.rq_in_scl, self.rq_in_zp, self.rq_out_scl, self.rq_out_zp
         )
@@ -163,7 +163,6 @@ class LegalizeQnnOpForHeadsail(DFPatternCallback):
 
 
     def callback(self, pre, post, node_map):
-        print("HERE!!!!!!!!!!!!!!!!!!!!")
         root = node_map[self.root][0]
         src = node_map[self.src][0]
         wgh = node_map[self.wgh][0]
