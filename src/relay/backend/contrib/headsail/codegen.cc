@@ -59,6 +59,28 @@ inline size_t GetShape1DSize(const Type& type) {
   return std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<int>());
 }
 
+/*!
+ * \brief Replace var expr which bind with args of call node
+ *
+ * \param args vector of expression (contains vars or constant nodes)
+ * \param cn call node which describe mapping of internal body vars with args
+ * \return updated vector of expressions
+ */
+static tvm::Array<Expr> BindToCallNodeArgs(const std::vector<Expr>& args, const CallNode* cn) {
+  tvm::Array<Expr> res;
+  for (const auto& arg : args) {
+    if (arg->IsInstance<ConstantNode>()) {
+      res.push_back(arg);
+    } else {
+      auto body_params = cn->op.as<FunctionNode>()->params;
+      auto found = std::find(body_params.begin(), body_params.end(), arg);
+      ICHECK(found != body_params.end());
+      auto idx = std::distance(body_params.begin(), found);
+      res.push_back(cn->args[idx]);
+    }
+  }
+  return res;
+}
 
 class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, public HeadsailCodegenCBase {
     public:
@@ -69,63 +91,34 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
         const_names_(const_names),
         ext_func_id_(std::move(ext_func_id)) {}
 
-
-		CompositeCallables Conv2d_bias(const FunctionNode* callee) {
+CompositeCallables Conv2d_bias(const FunctionNode* callee) {
 
 			CompositeCallables callables;
-
-			const ClipAttrs* clip_attr = nullptr;
-			const qnn::RequantizeAttrs* requantize_attr = nullptr;
-			const BiasAddAttrs* bias_attr = nullptr;
 			const Conv2DAttrs* conv2d_attr = nullptr;
 
 			const auto* current_call = callee->body.as<CallNode>();
 
 
-			if (backend::IsOp(current_call, "clip")) {
-				std::cout << "CLIP!!!!!!!!!!!!!" << std::endl;
-				clip_attr = current_call->attrs.as<ClipAttrs>();
-				current_call = current_call->args[0].as<CallNode>();
-				ICHECK(clip_attr);
-			}
-			if (backend::IsOp(current_call, "qnn.requantize")) {
-				std::cout << "REQ!!!!!!!!!!!!!" << std::endl;
-				requantize_attr = current_call->attrs.as<qnn::RequantizeAttrs>();
-
-				// Input scale
-				for (auto const& arg : VisitExpr(current_call->args[1])) {
-					callables.static_args.push_back(arg.name); // Const calls
-				}
-
-				// Input zero
-				for (auto const& arg : VisitExpr(current_call->args[2])) {
-					callables.static_args.push_back(arg.name); // Const calls
-				}
-
-				// Output zero
-				for (auto const& arg : VisitExpr(current_call->args[3])) {
-					callables.static_args.push_back(arg.name); // Const calls
-				}
-
-				// Output scale
-				for (auto const& arg : VisitExpr(current_call->args[4])) {
-					callables.static_args.push_back(arg.name); // Const calls
-				}
-				current_call = current_call->args[0].as<CallNode>();
-				ICHECK(requantize_attr);
-			}
-
-			if (backend::IsOp(current_call, "nn.bias_add")) {
+			if (backend::IsOp(current_call, "add")) {
 				std::cout << "BIAS!!!!!!!!!!!!!" << std::endl;
-				bias_attr = current_call->attrs.as<BiasAddAttrs>();
 				current_call = current_call->args[0].as<CallNode>();
-				ICHECK(bias_attr);
 			}
 
 			if (backend::IsOp(current_call, "qnn.conv2d")) {
 				std::cout << "CONV!!!!!!!!!!!!!" << std::endl;
-				//auto conv2d_args = GetArgumentNames(callee->body.as<CallNode>());
-				//callables.passed_args.insert(callables.passed_args.end(), conv2d_args.begin(), conv2d_args.end());
+
+				// // Input zero point
+				// for (auto const& arg : VisitExpr(current_call->args[2])) {
+				// 	std::cout << "ARG:" << arg.name << std::endl;
+				// 	callables.static_args.push_back(arg.name); // Const calls
+				// }
+
+				// // Input scale
+				// for (auto const& arg : VisitExpr(current_call->args[4])) {
+				// 	std::cout << "ARG:" << arg.name << std::endl;
+				// 	callables.static_args.push_back(arg.name); // Const calls
+				// }
+
 				conv2d_attr = current_call->attrs.as<Conv2DAttrs>();
 				ICHECK(conv2d_attr);
 			}
@@ -175,19 +168,18 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
 
 			// Padding
 			callables.static_args.push_back(std::to_string(conv2d_attr->padding[0].as<IntImmNode>()->value)); // Pad top
-			callables.static_args.push_back(std::to_string(conv2d_attr->padding[1].as<IntImmNode>()->value)); // Pad left
 			callables.static_args.push_back(std::to_string(conv2d_attr->padding[3].as<IntImmNode>()->value)); // Pad right
+			callables.static_args.push_back(std::to_string(conv2d_attr->padding[1].as<IntImmNode>()->value)); // Pad left
 			callables.static_args.push_back(std::to_string(conv2d_attr->padding[2].as<IntImmNode>()->value)); // Pad bottom
 			callables.static_args.push_back(std::to_string(0));                                               // Pad value
 
 			callables.static_args.push_back(std::to_string(conv2d_attr->strides[0].as<IntImmNode>()->value)); // Stride x
 			callables.static_args.push_back(std::to_string(conv2d_attr->strides[1].as<IntImmNode>()->value)); // Stride y
 			callables.static_args.push_back(std::to_string(0));                                               // Mac clip
-			callables.static_args.push_back(std::to_string(8));                                               // PP clip
+			callables.static_args.push_back(std::to_string(7));                                               // PP clip
 
 			return callables;
 		}
-
 
         std::vector<Output> VisitExprDefault_(const Object* op) final {
             LOG(FATAL) << "Headsail codegen doesn't support: " << op->GetTypeKey();
@@ -251,7 +243,7 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
 				const float* values = static_cast<const float*>(data->data);
                 // // Convert the constant values to string and push to vector
 				for (int64_t i = 0; i < num_elements; ++i) {
-					//std::cout << "D:"  << std::to_string(values[i]) << std::endl;
+					std::cout << "D:"  << std::to_string(values[i]) << std::endl;
 				    constant_values.push_back(std::to_string(values[i]));
 				}
 			}
@@ -259,7 +251,7 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
 				const int* values = static_cast<const int*>(data->data);
 				// // Convert the constant values to string and push to vector
 				for (int64_t i = 0; i < num_elements; ++i) {
-					//std::cout << "D:"  << std::to_string(values[i]) << std::endl;
+					std::cout << "D:"  << std::to_string(values[i]) << std::endl;
 				    constant_values.push_back(std::to_string(values[i]));
 				}
 			}
@@ -333,13 +325,12 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
             const auto pattern_name = callee->GetAttr<runtime::String>(attr::kComposite);
             ICHECK(pattern_name.defined()) << "Only functions with composite attribute supported";
 
-            if (pattern_name == "headsail.tflite_conv2d_bias_relu") {
-                const auto* conv_call = GetRootCall(callee->body.as<CallNode>(), 3,
-                                                    (const std::vector<std::string>){"qnn.conv2d", "nn.bias_add", "qnn.requantize", "clip"});
+            			if (pattern_name == "headsail.tflite_conv2d_bias") {
+                const auto* conv_call = GetRootCall(callee->body.as<CallNode>(), 1,
+                                                    (const std::vector<std::string>){"qnn.conv2d", "add"});
 				CompositeCallables callables = Conv2d_bias(callee);
-                return GenerateBody(conv_call, "dla_tvm_qnn_conv2d", GetArgumentNames(caller), callables.static_args);
+                return GenerateBody(conv_call, "dla_tvm_qnn_conv2d_bias", GetArgumentNames(caller), callables.static_args);
            }
-
             LOG(FATAL) << "Unknown composite function:" << pattern_name;
         }
 
@@ -381,7 +372,7 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
             for (const auto& out_type : out_types) {
                 this->PrintIndents();
                 const std::string out = "buf_" + std::to_string(buf_idx_++);
-                const auto out_size = GetShape1DSize(out_type);
+                const auto out_size = GetShape1DSize(out_type) * sizeof(int32_t);
                 decl_stream << ", " << out;
 
                 Output output;
@@ -389,7 +380,7 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
                 output.size = out_size;
                 output.dtype = GetDtypeString(out_type.as<TensorTypeNode>());
                 output.need_copy = true;
-                ret.buffers.push_back("int8_t* " + out + " = (int8_t*)malloc(" +
+                ret.buffers.push_back("int* " + out + " = (int*)malloc(" +
                                         std::to_string(out_size) + ");");
                 ret.outputs.push_back(output);
             }
