@@ -115,10 +115,10 @@ class LegalizeQnnOpForHeadsail(DFPatternCallback):
 
     def __init__(self):
         super(LegalizeQnnOpForHeadsail, self).__init__()
+        print("LEGALIZE _INIT_")
         self.src = wildcard()
         self.wgh = wildcard()
         self.bias = wildcard()
-        self.sum_src = wildcard()
 
         self.src_scl = is_constant()
         self.src_zp = is_constant()
@@ -163,6 +163,7 @@ class LegalizeQnnOpForHeadsail(DFPatternCallback):
 
 
     def callback(self, pre, post, node_map):
+        print("HERE!!!!!!!!!!!!!!!!!!!!")
         root = node_map[self.root][0]
         src = node_map[self.src][0]
         wgh = node_map[self.wgh][0]
@@ -256,7 +257,7 @@ def legalize_qnn_for_headsail(mod):
             transform.InferType(),
             # transform.SimplifyInference(),  # TODO: this pass decompose nn.layer_norm
             # transform.FoldScaleAxis(),  # TODO: fail inside TVM in case of grouped convolutions.
-            #transform.FoldConstant(),
+            transform.FoldConstant(),
         ]
     )
     with tvm.transform.PassContext(opt_level=3):
