@@ -382,7 +382,6 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
             for (size_t i = 1; i < func_args.size(); ++i) {
                 decl_stream << ", " << func_args[i];
             }
-            std::cout << "decl: " << decl_stream.str() << std::endl;
 
             // Analyze the output buffers
             std::vector<Type> out_types;
@@ -420,7 +419,6 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
             // Attach attribute arguments, op specific defined by the codegen
             for (size_t i = 0; i < attribute_args.size(); ++i) {
                 decl_stream << ", " << attribute_args[i];
-				std::cout << "Arg:" << attribute_args[i] << std::endl;
             }
             decl_stream << ");";
             ret.decl = func_name + decl_stream.str();

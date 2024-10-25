@@ -181,7 +181,6 @@ class HeadsailCodegenCBase {
     for (size_t i = 0; i < args.size(); i++) {
       arg_types.push_back(GetDtypeString(args[i]));
     }
-    //return GenerateBackendCFunc(func_name, arg_types, const_arr_name, outs, pass_dl_tensor);
     return GenerateBackendCFunc(func_name, arg_types, const_arr_name, outs, pass_dl_tensor);
   }
 
