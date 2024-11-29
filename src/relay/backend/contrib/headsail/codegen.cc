@@ -91,7 +91,7 @@ class CodegenHeadsail : public MemoizedExprTranslator<std::vector<Output>>, publ
         const_names_(const_names),
         ext_func_id_(std::move(ext_func_id)) {}
 
-CompositeCallables Conv2d_bias(const FunctionNode* callee) {
+CompositeCallables Conv2d_bias(const FunctionNode* callee, bool depthwise) {
 
 			CompositeCallables callables;
 			const Conv2DAttrs* conv2d_attr = nullptr;
@@ -141,28 +141,65 @@ CompositeCallables Conv2d_bias(const FunctionNode* callee) {
 			//callables.static_args.push_back(data_layout);
 			callables.static_args.push_back("\"HWC\"");
 
-			callables.static_args.push_back(std::to_string(wshape[3])); // Kernels amount
-			callables.static_args.push_back(std::to_string(wshape[2])); // Kernels channels
-			callables.static_args.push_back(std::to_string(wshape[0])); // Kernels height
-			callables.static_args.push_back(std::to_string(wshape[1])); // Kernels width
-
-
-			// Kernel layout
+			// Convert TVM layout string to Headsail layout string and determine positions
 			char kernel_layout[7];
 			std::strcpy(kernel_layout, "\"");
 			std::strcat(kernel_layout, conv2d_attr->kernel_layout.c_str());
 			std::strcat(kernel_layout, "\"");
 
-			// Convert TVM layout string to Headsail layout string
-			for (int i = 0; i < 7; ++i) {
+			// Determine positions based on letters 'I', 'C', 'K', 'O' in the layout string
+			int height_pos = -1;
+			int width_pos = -1;
+			int channel_pos = -1;
+			int kernel_pos = -1;
+
+			for (int i = 0; i < 6; ++i) {
 				if (kernel_layout[i] == 'I') {
-				kernel_layout[i] = 'C';
+					channel_pos = i-1;
+					kernel_layout[i] = 'C';
 				} else if (kernel_layout[i] == 'O') {
-				kernel_layout[i] = 'K';
+					kernel_pos = i-1;
+					kernel_layout[i] = 'K';
+				} else if (kernel_layout[i] == 'H') {
+					height_pos = i-1;
+					kernel_layout[i] = 'H';
+				} else if (kernel_layout[i] == 'W') {
+					width_pos = i-1;
+					kernel_layout[i] = 'W';
 				}
 			}
-			//callables.static_args.push_back(kernel_layout);
-			callables.static_args.push_back("\"HWCK\"");
+
+			// Check if all positions are set correctly
+			if (height_pos == -1 || width_pos == -1 || channel_pos == -1 || kernel_pos == -1) {
+				std::cerr << "Error: Invalid kernel layout format." << std::endl;
+			}
+
+			// Pushing static arguments in the correct order based on positions
+			callables.static_args.push_back(std::to_string(wshape[kernel_pos]));   // Kernels amount
+			callables.static_args.push_back(std::to_string(wshape[channel_pos]));  // Kernels channels
+			callables.static_args.push_back(std::to_string(wshape[height_pos]));   // Kernels height
+			callables.static_args.push_back(std::to_string(wshape[width_pos]));    // Kernels width
+
+			std::cout << "Kernels pos: " << std::to_string(kernel_pos) << std::endl;  // Kernels amount
+			std::cout << "Channels pos: " << std::to_string(channel_pos) << std::endl; // Kernels channels
+			std::cout << "Height pos: " << std::to_string(height_pos) << std::endl;    // Kernels height
+			std::cout << "Width pos: " << std::to_string(width_pos) << std::endl;      // Kernels width
+
+
+			// Printing values for verification with new layout
+			std::cout << "Kernels: " << std::to_string(wshape[kernel_pos]) << std::endl;  // Kernels amount
+			std::cout << "Channels: " << std::to_string(wshape[channel_pos]) << std::endl; // Kernels channels
+			std::cout << "Height: " << std::to_string(wshape[height_pos]) << std::endl;    // Kernels height
+			std::cout << "Width: " << std::to_string(wshape[width_pos]) << std::endl;      // Kernels width
+
+			// Adding the converted layout as a static argument
+			//callables.static_args.push_back("\"HWCK\"");
+			callables.static_args.push_back(kernel_layout);
+
+			if (depthwise) {
+				std::cout << "GROUPS:" << std::to_string(conv2d_attr->groups) << std::endl;
+				callables.static_args.push_back(std::to_string(conv2d_attr->groups));
+			}
 
 			callables.static_args.push_back(std::to_string(conv2d_attr->groups * wshape[3]));
 
@@ -176,7 +213,7 @@ CompositeCallables Conv2d_bias(const FunctionNode* callee) {
 			callables.static_args.push_back(std::to_string(conv2d_attr->strides[0].as<IntImmNode>()->value)); // Stride x
 			callables.static_args.push_back(std::to_string(conv2d_attr->strides[1].as<IntImmNode>()->value)); // Stride y
 			callables.static_args.push_back(std::to_string(0));                                               // Mac clip
-			callables.static_args.push_back(std::to_string(7));                                               // PP clip
+			callables.static_args.push_back(std::to_string(5));                                               // PP clip
 
 			return callables;
 		}
@@ -325,12 +362,18 @@ CompositeCallables Conv2d_bias(const FunctionNode* callee) {
             const auto pattern_name = callee->GetAttr<runtime::String>(attr::kComposite);
             ICHECK(pattern_name.defined()) << "Only functions with composite attribute supported";
 
-            			if (pattern_name == "headsail.tflite_conv2d_bias") {
+            if (pattern_name == "headsail.tflite_conv2d_bias") {
                 const auto* conv_call = GetRootCall(callee->body.as<CallNode>(), 1,
                                                     (const std::vector<std::string>){"qnn.conv2d", "add"});
-				CompositeCallables callables = Conv2d_bias(callee);
+				CompositeCallables callables = Conv2d_bias(callee, false);
                 return GenerateBody(conv_call, "dla_tvm_qnn_conv2d_bias", GetArgumentNames(caller), callables.static_args);
-           }
+			} else if (pattern_name == "headsail.tflite_conv2d_bias_depthwise") {
+                const auto* conv_call = GetRootCall(callee->body.as<CallNode>(), 1,
+                                                    (const std::vector<std::string>){"qnn.conv2d", "add"});
+				CompositeCallables callables = Conv2d_bias(callee, true);
+                return GenerateBody(conv_call, "dla_tvm_qnn_conv2d_grouped_bias", GetArgumentNames(caller), callables.static_args);
+			}
+
             LOG(FATAL) << "Unknown composite function:" << pattern_name;
         }
 
